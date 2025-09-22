@@ -3,7 +3,12 @@ const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const path = require('path');
-require('dotenv').config();
+const dotenv = require('dotenv');
+// 우선 루트 .env를 로드하고, 없으면 server/.env를 시도
+const loaded = dotenv.config();
+if (!loaded.parsed) {
+  dotenv.config({ path: path.join(__dirname, 'server', '.env') });
+}
 
 const app = express();
 const PORT = process.env.PORT || 5000;

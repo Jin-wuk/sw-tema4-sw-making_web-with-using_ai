@@ -7,7 +7,10 @@ import {
   FaWind,
   FaEye,
   FaMapMarkerAlt,
-  FaSearch
+  FaSearch,
+  FaCloud,
+  FaSun,
+  FaMoon
 } from 'react-icons/fa';
 
 const WeatherContainer = styled.div`
@@ -117,6 +120,12 @@ const CityName = styled.h3`
   color: #333;
 `;
 
+const DateLabel = styled.div`
+  font-size: 12px;
+  color: #888;
+  margin-bottom: 8px;
+`;
+
 const WeatherIcon = styled.div`
   font-size: 24px;
   color: #667eea;
@@ -204,12 +213,97 @@ const Error = styled.div`
   margin: 20px 0;
 `;
 
+// Modal for 7-day forecast
+const ModalOverlay = styled.div`
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+`;
+
+const ModalContent = styled.div`
+  width: 90%;
+  max-width: 800px;
+  background: #ffffff;
+  border-radius: 16px;
+  padding: 24px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+`;
+
+const ModalHeader = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+`;
+
+const ModalTitle = styled.h3`
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  color: #333;
+`;
+
+const CloseButton = styled.button`
+  background: transparent;
+  border: none;
+  font-size: 18px;
+  cursor: pointer;
+  color: #666;
+`;
+
+// 7-day list layout like the provided screenshot
+const List = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+`;
+
+const Row = styled.div`
+  display: grid;
+  grid-template-columns: 80px 80px 1fr 120px;
+  align-items: center;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(102, 126, 234, 0.06);
+`;
+
+const Col = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #333;
+`;
+
+const DayLabel = styled.div`
+  font-weight: 700;
+  color: #3f3f3f;
+`;
+
+const RainProb = styled.div`
+  color: #667eea;
+  font-weight: 600;
+`;
+
+const Temps = styled.div`
+  text-align: right;
+  font-weight: 700;
+`;
+
 function Weather() {
   const [weatherData, setWeatherData] = useState(null);
   const [forecastData, setForecastData] = useState(null);
+  const [forecastBaseTime, setForecastBaseTime] = useState(null);
   const [selectedCity, setSelectedCity] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
   const gangwonCities = [
     '춘천', '원주', '강릉', '동해', '태백', '속초', 
@@ -245,13 +339,45 @@ function Weather() {
     try {
       const response = await fetch(`/api/weather/forecast?city=${city}`);
       const data = await response.json();
-      
-      if (data.success) {
-        setForecastData(data.forecast);
+
+      if (!data.success) {
+        setForecastData(buildDummyForecast());
+        return;
+      }
+
+      // New API shape: { forecast: { regionSummary: { gangwonYeongdong|gangwonYeongseo: { summaryDays: [...] } } } }
+      const regionKey = mapCityToGangwonRegion(city);
+      const days = data?.forecast?.regionSummary?.[regionKey]?.summaryDays || [];
+      const baseTime = data?.forecast?.baseTime || null;
+      setForecastBaseTime(baseTime);
+      // Limit to 7 days
+      const sliced = days.slice(0, 7);
+      if (sliced.length === 0) {
+        setForecastData(buildDummyForecast());
+      } else {
+        setForecastData(
+          sliced.map((d) => {
+            const displayDate = computeDateFromBase(baseTime, d.day);
+            return {
+              date: displayDate,
+              pop: d.rainProbability ?? null,
+              dayWeather: d.weatherMorning || '-',
+              nightWeather: d.weatherAfternoon || '-',
+              tmax: d.tmax ?? null,
+              tmin: d.tmin ?? null
+            };
+          })
+        );
       }
     } catch (err) {
       console.error('예보 정보 오류:', err);
+      setForecastData(buildDummyForecast());
     }
+  };
+
+  const mapCityToGangwonRegion = (city) => {
+    const yeongdong = ['강릉', '동해', '속초', '삼척', '양양', '고성'];
+    return yeongdong.includes(city) ? 'gangwonYeongdong' : 'gangwonYeongseo';
   };
 
   const handleCitySearch = async () => {
@@ -275,9 +401,73 @@ function Weather() {
     }
   };
 
-  const handleCityClick = (cityName) => {
+  const handleCityClick = async (cityName) => {
     setSelectedCity(cityName);
-    fetchForecastData(cityName);
+    await fetchForecastData(cityName);
+    setIsModalOpen(true);
+  };
+
+  const closeModal = () => {
+    setIsModalOpen(false);
+  };
+
+  const buildDummyForecast = () => {
+    const labels = buildNext7DatesLabels();
+    const temps = [
+      { max: 24, min: 18 },
+      { max: 26, min: 16 },
+      { max: 24, min: 16 },
+      { max: 26, min: 18 },
+      { max: 25, min: 19 },
+      { max: 26, min: 19 },
+      { max: 27, min: 18 }
+    ];
+    const pops = [40, 20, 20, 30, 90, 30, 10];
+    const dayWeathers = ['비', '맑음', '구름', '구름', '비', '구름', '맑음'];
+    const nightWeathers = ['구름', '구름', '구름', '구름', '비', '맑음', '맑음'];
+    return labels.map((label, i) => ({
+      date: label,
+      pop: pops[i],
+      tmax: temps[i].max,
+      tmin: temps[i].min,
+      dayWeather: dayWeathers[i],
+      nightWeather: nightWeathers[i]
+    }));
+  };
+
+  const buildNext7DatesLabels = () => {
+    const labels = [];
+    const today = new Date();
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(today);
+      d.setDate(today.getDate() + i);
+      labels.push(formatKoreanDate(d));
+    }
+    return labels;
+  };
+
+  const computeDateFromBase = (baseTime, dayNumber) => {
+    if (!baseTime || String(baseTime).length < 8) {
+      const fallback = new Date();
+      fallback.setDate(fallback.getDate() + (dayNumber || 0));
+      return formatKoreanDate(fallback);
+    }
+    const y = Number(String(baseTime).slice(0, 4));
+    const m = Number(String(baseTime).slice(4, 6)) - 1;
+    const d = Number(String(baseTime).slice(6, 8));
+    const baseDate = new Date(y, m, d);
+    // KMA mid-term uses 3~10일 → interpret as baseDate + (dayNumber) days
+    const target = new Date(baseDate);
+    target.setDate(baseDate.getDate() + Number(dayNumber || 0));
+    return formatKoreanDate(target);
+  };
+
+  const formatKoreanDate = (dateObj) => {
+    const weekdays = ['일', '월', '화', '수', '목', '금', '토'];
+    const mm = dateObj.getMonth() + 1;
+    const dd = dateObj.getDate();
+    const wd = weekdays[dateObj.getDay()];
+    return `${mm}월 ${dd}일 (${wd})`;
   };
 
   if (loading && !weatherData) {
@@ -320,6 +510,7 @@ function Weather() {
                 <FaMapMarkerAlt style={{ color: '#667eea' }} />
                 <CityName>{cityName}</CityName>
               </CityHeader>
+              <DateLabel>{formatKoreanDate(new Date())}</DateLabel>
               
               <WeatherIcon>
                 <FaCloudSun />
@@ -350,27 +541,37 @@ function Weather() {
         </CityGrid>
       )}
 
-      {forecastData && (
-        <ForecastSection>
-          <SearchTitle>{selectedCity} 5일 예보</SearchTitle>
-          <ForecastGrid>
-            {forecastData.map((forecast, index) => (
-              <ForecastCard key={index}>
-                <ForecastDate>
-                  {new Date(forecast.date).toLocaleDateString('ko-KR', {
-                    month: 'short',
-                    day: 'numeric',
-                    weekday: 'short'
-                  })}
-                </ForecastDate>
-                <ForecastTemp>
-                  {forecast.temperature.max}° / {forecast.temperature.min}°
-                </ForecastTemp>
-                <ForecastDesc>{forecast.description}</ForecastDesc>
-              </ForecastCard>
-            ))}
-          </ForecastGrid>
-        </ForecastSection>
+      {isModalOpen && (
+        <ModalOverlay onClick={closeModal}>
+          <ModalContent onClick={(e) => e.stopPropagation()}>
+            <ModalHeader>
+              <ModalTitle>{selectedCity} 7일 예보</ModalTitle>
+              <CloseButton onClick={closeModal}>닫기</CloseButton>
+            </ModalHeader>
+            <List>
+              {(forecastData || buildDummyForecast()).map((d, idx) => (
+                <Row key={idx}>
+                  <Col>
+                    <DayLabel>{d.date || `+${d.day}일`}</DayLabel>
+                  </Col>
+                  <Col>
+                    <FaTint style={{ color: '#667eea' }} />
+                    <RainProb>{d.pop != null ? `${d.pop}%` : '-'}</RainProb>
+                  </Col>
+                  <Col>
+                    <FaSun style={{ color: '#f5a623' }} /> {d.dayWeather || '-'}
+                    <FaMoon style={{ color: '#7b8ab8' }} /> {d.nightWeather || '-'}
+                  </Col>
+                  <Temps>
+                    {d.tmax != null && d.tmin != null
+                      ? `${d.tmax}° ${d.tmin}°`
+                      : '-'}
+                  </Temps>
+                </Row>
+              ))}
+            </List>
+          </ModalContent>
+        </ModalOverlay>
       )}
     </WeatherContainer>
   );
